@@ -1,0 +1,86 @@
+# Version 1.0.3 - Streamlit Web Scraper with Firebase Firestore
+
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# ==============================
+# Firebase Initialization
+# ==============================
+if not firebase_admin._apps:
+    cred = credentials.Certificate("firebase-key.json")  # <-- Your Firebase key
+    firebase_admin.initialize_app(cred)
+db = firestore.client()
+
+# ==============================
+# Scraper Function
+# ==============================
+def get_page_details(url):
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Extract details
+        title = soup.title.string.strip() if soup.title and soup.title.string else "[No Title]"
+        h1_tags = [h.get_text(strip=True) for h in soup.find_all('h1')]
+        h2_tags = [h.get_text(strip=True) for h in soup.find_all('h2')]
+        paragraphs = [p.get_text(strip=True) for p in soup.find_all('p')]
+        links = [(urljoin(url, a['href']), a.get_text(strip=True) or "[No Text]") for a in soup.find_all('a', href=True)]
+
+        return {
+            "url": url,
+            "title": title,
+            "h1": h1_tags,
+            "h2": h2_tags,
+            "paragraphs": paragraphs,
+            "links": links
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+# ==============================
+# Save to Firebase
+# ==============================
+def save_to_firebase(data):
+    try:
+        db.collection("scraped_pages").add(data)
+        return True
+    except Exception as e:
+        st.error(f"Error saving to Firebase: {e}")
+        return False
+
+# ==============================
+# Streamlit UI
+# ==============================
+st.set_page_config(page_title="Web Scraper v1.0.3", page_icon="🌐", layout="wide")
+st.title("🌐 Web Scraper (v1.0.3 with Firebase)")
+
+url = st.text_input("Enter the website URL:")
+
+if st.button("Scrape Website"):
+    if url:
+        with st.spinner("🔎 Scraping in progress..."):
+            data = get_page_details(url)
+
+        if "error" in data:
+            st.error(f"Error: {data['error']}")
+        else:
+            # Show results
+            st.subheader("📌 Page Details")
+            st.write(f"**Title:** {data['title']}")
+            st.write(f"**H1 Tags:** {data['h1']}")
+            st.write(f"**H2 Tags:** {data['h2']}")
+            st.write(f"**Paragraphs:** {data['paragraphs'][:5]} ...")  # show only first 5
+            st.write("**Links:**")
+            for link, text in data["links"][:10]:  # show only first 10
+                st.write(f"- [{text}]({link})")
+
+            # Save to Firebase
+            if save_to_firebase(data):
+                st.success("✅ Data saved to Firebase successfully!")
+    else:
+        st.warning("Please enter a URL to scrape.")
